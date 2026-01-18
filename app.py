@@ -56,20 +56,36 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     df["EC_Practica_OK"] = df["EC - PRÁCTICA"].apply(is_done_date)
 
     df["TA_Estado"] = np.select(
-        [~df["TA_Teoria_OK"],
-         df["TA_Teoria_OK"] & ~df["TA_Practica_OK"],
-         df["TA_Practica_OK"]],
-        ["Sin teoría", "Habilitado para práctica", "Práctica realizada"],
-        default="Sin dato"
-    )
+    [
+        ~df["TA_Teoria_OK"] & ~df["TA_Practica_OK"],
+        df["TA_Teoria_OK"] & ~df["TA_Practica_OK"],
+        df["TA_Teoria_OK"] & df["TA_Practica_OK"],
+        ~df["TA_Teoria_OK"] & df["TA_Practica_OK"],
+    ],
+    [
+        "Sin teoría ni práctica",
+        "Solo teoría",
+        "Teoría + práctica (Certificable)",
+        "Solo práctica (Inconsistencia)",
+    ],
+    default="Sin dato"
+)
 
     df["EC_Estado"] = np.select(
-        [~df["EC_Teoria_OK"],
-         df["EC_Teoria_OK"] & ~df["EC_Practica_OK"],
-         df["EC_Practica_OK"]],
-        ["Sin teoría", "Habilitado para práctica", "Práctica realizada"],
-        default="Sin dato"
-    )
+    [
+        ~df["EC_Teoria_OK"] & ~df["EC_Practica_OK"],
+        df["EC_Teoria_OK"] & ~df["EC_Practica_OK"],
+        df["EC_Teoria_OK"] & df["EC_Practica_OK"],
+        ~df["EC_Teoria_OK"] & df["EC_Practica_OK"],
+    ],
+    [
+        "Sin teoría ni práctica",
+        "Solo teoría",
+        "Teoría + práctica (Certificable)",
+        "Solo práctica (Inconsistencia)",
+    ],
+    default="Sin dato"
+)
 
     return df
 
