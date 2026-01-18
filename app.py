@@ -13,6 +13,9 @@ st.caption(
     "Aplica para Trabajo en Altura (TA) y Espacios Confinados (EC)."
 )
 
+# Archivo fijo dentro del repo
+DATA_PATH = "data/registro_ta_ec.xlsx"
+
 PENDING_WORDS = {"PENDIENTE", "S/N", "SN", "NO", "N/A", "NA", ""}
 
 # ---------------- Helpers ----------------
@@ -31,7 +34,7 @@ def is_done_date(x) -> bool:
             return True
         except Exception:
             return False
-    # En algunos Excels puede venir como número (serial). Lo tratamos como hecho.
+    # Excel a veces guarda fechas como número (serial)
     if isinstance(x, (int, float)) and not pd.isna(x):
         return True
     return False
@@ -53,7 +56,10 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     ]
     missing = [c for c in required if c not in df.columns]
     if missing:
-        st.error(f"Faltan columnas en el Excel: {missing}")
+        st.error(
+            "Faltan columnas en el Excel: "
+            f"{missing}\n\nTip: revisá el nombre exacto de columnas o el parámetro header (header=2 / header=0)."
+        )
         st.stop()
 
     # Limpieza
@@ -122,29 +128,34 @@ def avance_por_grupo(dfx: pd.DataFrame, group_col: str, teo_ok_col: str, prac_ok
     g = g.sort_values(["AVANCE_%", "BASE_TEORIA"], ascending=[False, False]).reset_index()
     return g
 
-# ---------------- Input ----------------
-uploaded = st.file_uploader("Subí el Excel base (.xlsx)", type=["xlsx"])
+# ---------------- Carga desde GitHub (repo) ----------------
 st.divider()
 
-if not uploaded:
-    st.info("Subí un Excel para comenzar.")
+try:
+    # Si tus encabezados están en la fila 3 (con 2 filas de título arriba), header=2.
+    # Si los encabezados están en la fila 1, cambiá a header=0.
+    df = pd.read_excel(DATA_PATH, sheet_name=0, header=2)
+except FileNotFoundError:
+    st.error(f"No se encontró el archivo en: {DATA_PATH}. Revisá que exista data/registro_ta_ec.xlsx en el repo.")
     st.stop()
 
-# Tu plantilla suele tener 2 filas de título y encabezados en la fila 3.
-# Si algún día movés encabezados a la fila 1, cambiá header=0.
-df = pd.read_excel(uploaded, sheet_name=0, header=2)
 df = normalize_df(df)
 
 # ---------------- Filtros ----------------
 st.markdown("## Filtros")
-f1, f2, f3, f4 = st.columns(4)
+f1, f2, f3, f4, f5 = st.columns([1.2, 1.2, 1.6, 1.2, 1.2])
 
 tema = f1.selectbox("Tema", ["Ambos", "Trabajo en Altura (TA)", "Espacios Confinados (EC)"])
 tipo = f2.multiselect("Tipo de personal", sorted(df["Tipo de personal"].unique()), default=sorted(df["Tipo de personal"].unique()))
 empresa = f3.multiselect("Empresa", sorted(df["Empresa"].unique()), default=sorted(df["Empresa"].unique()))
-busqueda = f4.text_input("Buscar (DNI o nombre)", "")
+puesto = f4.multiselect("Puesto", sorted(df["Puesto"].unique()), default=sorted(df["Puesto"].unique()))
+busqueda = f5.text_input("Buscar (DNI o nombre)", "")
 
-df_f = df[df["Tipo de personal"].isin(tipo) & df["Empresa"].isin(empresa)].copy()
+df_f = df[
+    df["Tipo de personal"].isin(tipo) &
+    df["Empresa"].isin(empresa) &
+    df["Puesto"].isin(puesto)
+].copy()
 
 if busqueda.strip():
     q = busqueda.strip().lower()
@@ -220,14 +231,16 @@ if show_ta:
         st.markdown("### TA – Por Empresa")
         ta_emp = avance_por_grupo(df_f[df_f["TA_Teoria_OK"]], "Empresa", "TA_Teoria_OK", "TA_Practica_OK")
         st.dataframe(ta_emp, use_container_width=True)
-        st.bar_chart(ta_emp.set_index("Empresa")[["AVANCE_%"]])
+        if not ta_emp.empty:
+            st.bar_chart(ta_emp.set_index("Empresa")[["AVANCE_%"]])
 
 if show_ec:
     with t2:
         st.markdown("### EC – Por Empresa")
         ec_emp = avance_por_grupo(df_f[df_f["EC_Teoria_OK"]], "Empresa", "EC_Teoria_OK", "EC_Practica_OK")
         st.dataframe(ec_emp, use_container_width=True)
-        st.bar_chart(ec_emp.set_index("Empresa")[["AVANCE_%"]])
+        if not ec_emp.empty:
+            st.bar_chart(ec_emp.set_index("Empresa")[["AVANCE_%"]])
 
 t3, t4 = st.columns(2)
 
@@ -236,19 +249,21 @@ if show_ta:
         st.markdown("### TA – Por Tipo de personal")
         ta_tipo = avance_por_grupo(df_f[df_f["TA_Teoria_OK"]], "Tipo de personal", "TA_Teoria_OK", "TA_Practica_OK")
         st.dataframe(ta_tipo, use_container_width=True)
-        st.bar_chart(ta_tipo.set_index("Tipo de personal")[["AVANCE_%"]])
+        if not ta_tipo.empty:
+            st.bar_chart(ta_tipo.set_index("Tipo de personal")[["AVANCE_%"]])
 
 if show_ec:
     with t4:
         st.markdown("### EC – Por Tipo de personal")
         ec_tipo = avance_por_grupo(df_f[df_f["EC_Teoria_OK"]], "Tipo de personal", "EC_Teoria_OK", "EC_Practica_OK")
         st.dataframe(ec_tipo, use_container_width=True)
-        st.bar_chart(ec_tipo.set_index("Tipo de personal")[["AVANCE_%"]])
+        if not ec_tipo.empty:
+            st.bar_chart(ec_tipo.set_index("Tipo de personal")[["AVANCE_%"]])
 
 st.divider()
 
-# ---------------- Listados operativos + descarga ----------------
-st.markdown("## Listados (filtros por estado y exportación)")
+# ---------------- Listados + descargas ----------------
+st.markdown("## Listados (por estado) + Descargas")
 
 tab1, tab2 = st.columns(2)
 
@@ -256,7 +271,7 @@ if show_ta:
     with tab1:
         st.markdown("### Trabajo en Altura (TA)")
         estados_ta = sorted(df_f["TA_Estado"].unique())
-        sel_ta = st.multiselect("Estado TA", estados_ta, default=estados_ta)
+        sel_ta = st.multiselect("Estado TA", estados_ta, default=estados_ta, key="estado_ta")
 
         df_ta = df_f[df_f["TA_Estado"].isin(sel_ta)].copy()
         st.dataframe(
@@ -267,7 +282,6 @@ if show_ta:
             use_container_width=True
         )
 
-        # Certificables TA (sobre filtros actuales)
         df_ta_cert = df_ta[df_ta["TA_Estado"] == "Teoría + práctica (Certificable)"].copy()
 
         cA, cB = st.columns(2)
@@ -290,7 +304,7 @@ if show_ec:
     with tab2:
         st.markdown("### Espacios Confinados (EC)")
         estados_ec = sorted(df_f["EC_Estado"].unique())
-        sel_ec = st.multiselect("Estado EC", estados_ec, default=estados_ec)
+        sel_ec = st.multiselect("Estado EC", estados_ec, default=estados_ec, key="estado_ec")
 
         df_ec = df_f[df_f["EC_Estado"].isin(sel_ec)].copy()
         st.dataframe(
@@ -301,7 +315,6 @@ if show_ec:
             use_container_width=True
         )
 
-        # Certificables EC (sobre filtros actuales)
         df_ec_cert = df_ec[df_ec["EC_Estado"] == "Teoría + práctica (Certificable)"].copy()
 
         cA, cB = st.columns(2)
@@ -319,3 +332,5 @@ if show_ec:
                 file_name="EC_certificables.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+st.caption("Si tus encabezados no se detectan, probá cambiar header=2 por header=0 (según dónde esté la fila de columnas).")
