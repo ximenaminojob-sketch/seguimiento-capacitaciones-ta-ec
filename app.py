@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,11 +7,17 @@ from io import BytesIO
 st.set_page_config(page_title="Seguimiento TA/EC", layout="wide")
 
 st.title("Seguimiento de Capacitaciones Teoría–Práctica")
-st.caption("Trabajo en Altura (TA) y Espacios Confinados (EC) — estados operativos (sin reprobados).")
+st.caption(
+    "Tablero de avance medido sobre personas con TEORÍA realizada. "
+    "Certificable = Teoría + Práctica (fecha en ambas celdas). "
+    "Aplica para Trabajo en Altura (TA) y Espacios Confinados (EC)."
+)
 
 PENDING_WORDS = {"PENDIENTE", "S/N", "SN", "NO", "N/A", "NA", ""}
 
+# ---------------- Helpers ----------------
 def is_done_date(x) -> bool:
+    """True si x parece una fecha válida. False si vacío/PENDIENTE/SN/etc."""
     if pd.isna(x):
         return False
     if isinstance(x, pd.Timestamp):
@@ -24,15 +31,19 @@ def is_done_date(x) -> bool:
             return True
         except Exception:
             return False
+    # En algunos Excels puede venir como número (serial). Lo tratamos como hecho.
+    if isinstance(x, (int, float)) and not pd.isna(x):
+        return True
     return False
 
-def to_excel_bytes(dataframe: pd.DataFrame) -> bytes:
+def to_excel_bytes(dataframe: pd.DataFrame, sheet_name="Datos") -> bytes:
     out = BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        dataframe.to_excel(writer, index=False, sheet_name="Datos")
+        dataframe.to_excel(writer, index=False, sheet_name=sheet_name)
     return out.getvalue()
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    # Quita columnas "Unnamed" que suelen aparecer con celdas combinadas
     df = df.loc[:, ~df.columns.astype(str).str.contains(r"^Unnamed", regex=True)].copy()
 
     required = [
@@ -45,50 +56,73 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
         st.error(f"Faltan columnas en el Excel: {missing}")
         st.stop()
 
+    # Limpieza
     df["DNI"] = df["DNI"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
-    df["Apellido y Nombre"] = df["Apellido y Nombre"].astype(str).str.strip()
-    df["Tipo de personal"] = df["Tipo de personal"].astype(str).str.strip()
-    df["Empresa"] = df["Empresa"].astype(str).str.strip()
+    for col in ["Apellido y Nombre","Puesto","Especialidad","Tipo de personal","Empresa"]:
+        df[col] = df[col].astype(str).str.strip()
 
+    # Flags
     df["TA_Teoria_OK"] = df["TA - TEORÍA"].apply(is_done_date)
     df["TA_Practica_OK"] = df["TA - PRÁCTICA"].apply(is_done_date)
     df["EC_Teoria_OK"] = df["EC - TEORÍA"].apply(is_done_date)
     df["EC_Practica_OK"] = df["EC - PRÁCTICA"].apply(is_done_date)
 
+    # Estados completos por tema
     df["TA_Estado"] = np.select(
-    [
-        ~df["TA_Teoria_OK"] & ~df["TA_Practica_OK"],
-        df["TA_Teoria_OK"] & ~df["TA_Practica_OK"],
-        df["TA_Teoria_OK"] & df["TA_Practica_OK"],
-        ~df["TA_Teoria_OK"] & df["TA_Practica_OK"],
-    ],
-    [
-        "Sin teoría ni práctica",
-        "Solo teoría",
-        "Teoría + práctica (Certificable)",
-        "Solo práctica (Inconsistencia)",
-    ],
-    default="Sin dato"
-)
+        [
+            ~df["TA_Teoria_OK"] & ~df["TA_Practica_OK"],
+            df["TA_Teoria_OK"] & ~df["TA_Practica_OK"],
+            df["TA_Teoria_OK"] & df["TA_Practica_OK"],
+            ~df["TA_Teoria_OK"] & df["TA_Practica_OK"],
+        ],
+        [
+            "Sin teoría ni práctica",
+            "Solo teoría",
+            "Teoría + práctica (Certificable)",
+            "Solo práctica (Inconsistencia)",
+        ],
+        default="Sin dato"
+    )
 
     df["EC_Estado"] = np.select(
-    [
-        ~df["EC_Teoria_OK"] & ~df["EC_Practica_OK"],
-        df["EC_Teoria_OK"] & ~df["EC_Practica_OK"],
-        df["EC_Teoria_OK"] & df["EC_Practica_OK"],
-        ~df["EC_Teoria_OK"] & df["EC_Practica_OK"],
-    ],
-    [
-        "Sin teoría ni práctica",
-        "Solo teoría",
-        "Teoría + práctica (Certificable)",
-        "Solo práctica (Inconsistencia)",
-    ],
-    default="Sin dato"
-)
+        [
+            ~df["EC_Teoria_OK"] & ~df["EC_Practica_OK"],
+            df["EC_Teoria_OK"] & ~df["EC_Practica_OK"],
+            df["EC_Teoria_OK"] & df["EC_Practica_OK"],
+            ~df["EC_Teoria_OK"] & df["EC_Practica_OK"],
+        ],
+        [
+            "Sin teoría ni práctica",
+            "Solo teoría",
+            "Teoría + práctica (Certificable)",
+            "Solo práctica (Inconsistencia)",
+        ],
+        default="Sin dato"
+    )
 
     return df
 
+def avance_sobre_teoria(dfx: pd.DataFrame, teo_ok_col: str, prac_ok_col: str):
+    """Avance medido sobre base de personas con TEORÍA hecha."""
+    base_teoria = int(dfx[teo_ok_col].sum())
+    certificables = int((dfx[teo_ok_col] & dfx[prac_ok_col]).sum())
+    pendientes = int((dfx[teo_ok_col] & ~dfx[prac_ok_col]).sum())
+    pct = (certificables / base_teoria * 100) if base_teoria else 0
+    return base_teoria, certificables, pendientes, pct
+
+def avance_por_grupo(dfx: pd.DataFrame, group_col: str, teo_ok_col: str, prac_ok_col: str) -> pd.DataFrame:
+    """Tabla de avance por grupo (Empresa / Tipo) sobre base con TEORÍA."""
+    tmp = dfx.copy()
+    tmp["BASE_TEORIA"] = tmp[teo_ok_col].astype(int)
+    tmp["CERTIFICABLE"] = (tmp[teo_ok_col] & tmp[prac_ok_col]).astype(int)
+
+    g = tmp.groupby(group_col)[["BASE_TEORIA", "CERTIFICABLE"]].sum()
+    g["PENDIENTE_PRACTICA"] = g["BASE_TEORIA"] - g["CERTIFICABLE"]
+    g["AVANCE_%"] = np.where(g["BASE_TEORIA"] > 0, (g["CERTIFICABLE"] / g["BASE_TEORIA"] * 100), 0)
+    g = g.sort_values(["AVANCE_%", "BASE_TEORIA"], ascending=[False, False]).reset_index()
+    return g
+
+# ---------------- Input ----------------
 uploaded = st.file_uploader("Subí el Excel base (.xlsx)", type=["xlsx"])
 st.divider()
 
@@ -96,16 +130,19 @@ if not uploaded:
     st.info("Subí un Excel para comenzar.")
     st.stop()
 
-# Tu plantilla tiene 2 filas de título y encabezados en la fila 3:
+# Tu plantilla suele tener 2 filas de título y encabezados en la fila 3.
+# Si algún día movés encabezados a la fila 1, cambiá header=0.
 df = pd.read_excel(uploaded, sheet_name=0, header=2)
 df = normalize_df(df)
 
-# -------- Filtros --------
-c1, c2, c3, c4 = st.columns(4)
-tema = c1.selectbox("Tema", ["Ambos", "Trabajo en Altura (TA)", "Espacios Confinados (EC)"])
-tipo = c2.multiselect("Tipo de personal", sorted(df["Tipo de personal"].unique()), default=sorted(df["Tipo de personal"].unique()))
-empresa = c3.multiselect("Empresa", sorted(df["Empresa"].unique()), default=sorted(df["Empresa"].unique()))
-busqueda = c4.text_input("Buscar (DNI o nombre)", "")
+# ---------------- Filtros ----------------
+st.markdown("## Filtros")
+f1, f2, f3, f4 = st.columns(4)
+
+tema = f1.selectbox("Tema", ["Ambos", "Trabajo en Altura (TA)", "Espacios Confinados (EC)"])
+tipo = f2.multiselect("Tipo de personal", sorted(df["Tipo de personal"].unique()), default=sorted(df["Tipo de personal"].unique()))
+empresa = f3.multiselect("Empresa", sorted(df["Empresa"].unique()), default=sorted(df["Empresa"].unique()))
+busqueda = f4.text_input("Buscar (DNI o nombre)", "")
 
 df_f = df[df["Tipo de personal"].isin(tipo) & df["Empresa"].isin(empresa)].copy()
 
@@ -119,80 +156,166 @@ if busqueda.strip():
 show_ta = tema in ["Ambos", "Trabajo en Altura (TA)"]
 show_ec = tema in ["Ambos", "Espacios Confinados (EC)"]
 
-# -------- KPIs --------
-def kpis_for(prefix: str, dfx: pd.DataFrame):
-    total = len(dfx)
-    teo = int(dfx[f"{prefix}_Teoria_OK"].sum())
-    prac = int(dfx[f"{prefix}_Practica_OK"].sum())
-    habil = int((dfx[f"{prefix}_Teoria_OK"] & ~dfx[f"{prefix}_Practica_OK"]).sum())
-    pct_teo = (teo / total * 100) if total else 0
-    pct_prac_total = (prac / total * 100) if total else 0
-    pct_prac_teo = (prac / teo * 100) if teo else 0
-    return total, teo, habil, prac, pct_teo, pct_prac_total, pct_prac_teo
+st.divider()
 
-kcol1, kcol2 = st.columns(2)
+# ---------------- Tablero (KPIs + progreso) ----------------
+st.markdown("## Tablero de avance (sobre personas con teoría)")
+
+k1, k2 = st.columns(2)
 
 if show_ta:
-    total, teo, habil, prac, pct_teo, pct_prac_total, pct_prac_teo = kpis_for("TA", df_f)
-    with kcol1:
+    base, cert, pend, pct = avance_sobre_teoria(df_f, "TA_Teoria_OK", "TA_Practica_OK")
+    with k1:
         st.subheader("Trabajo en Altura (TA)")
-        a,b,c,d = st.columns(4)
-        a.metric("Total nómina", total)
-        b.metric("Con teoría", teo, f"{pct_teo:.1f}%")
-        c.metric("Habilitados práctica", habil)
-        d.metric("Práctica realizada", prac, f"{pct_prac_total:.1f}% vs total | {pct_prac_teo:.1f}% vs teoría")
+        a,b,c = st.columns(3)
+        a.metric("Base con teoría", base)
+        b.metric("Certificables (Teo+Prac)", cert)
+        c.metric("Pendientes de práctica", pend)
+        st.metric("% Avance (certificables / base)", f"{pct:.1f}%")
+        st.progress(min(int(round(pct)), 100))
 
 if show_ec:
-    total, teo, habil, prac, pct_teo, pct_prac_total, pct_prac_teo = kpis_for("EC", df_f)
-    with kcol2:
+    base, cert, pend, pct = avance_sobre_teoria(df_f, "EC_Teoria_OK", "EC_Practica_OK")
+    with k2:
         st.subheader("Espacios Confinados (EC)")
-        a,b,c,d = st.columns(4)
-        a.metric("Total nómina", total)
-        b.metric("Con teoría", teo, f"{pct_teo:.1f}%")
-        c.metric("Habilitados práctica", habil)
-        d.metric("Práctica realizada", prac, f"{pct_prac_total:.1f}% vs total | {pct_prac_teo:.1f}% vs teoría")
+        a,b,c = st.columns(3)
+        a.metric("Base con teoría", base)
+        b.metric("Certificables (Teo+Prac)", cert)
+        c.metric("Pendientes de práctica", pend)
+        st.metric("% Avance (certificables / base)", f"{pct:.1f}%")
+        st.progress(min(int(round(pct)), 100))
 
 st.divider()
 
-# -------- Tablas operativas --------
+# ---------------- Gráficos ----------------
+st.markdown("## Gráficos (sobre base con teoría)")
+g1, g2 = st.columns(2)
+
+if show_ta:
+    base, cert, pend, pct = avance_sobre_teoria(df_f, "TA_Teoria_OK", "TA_Practica_OK")
+    chart_ta = pd.DataFrame(
+        {"Estado": ["Certificables", "Pendientes de práctica"], "Personas": [cert, pend]}
+    ).set_index("Estado")
+    with g1:
+        st.markdown("### TA – Certificables vs Pendientes")
+        st.bar_chart(chart_ta)
+
+if show_ec:
+    base, cert, pend, pct = avance_sobre_teoria(df_f, "EC_Teoria_OK", "EC_Practica_OK")
+    chart_ec = pd.DataFrame(
+        {"Estado": ["Certificables", "Pendientes de práctica"], "Personas": [cert, pend]}
+    ).set_index("Estado")
+    with g2:
+        st.markdown("### EC – Certificables vs Pendientes")
+        st.bar_chart(chart_ec)
+
+st.divider()
+
+# ---------------- Avance por Empresa / Tipo ----------------
+st.markdown("## Avance por Empresa y por Tipo de personal (sobre base con teoría)")
+t1, t2 = st.columns(2)
+
+if show_ta:
+    with t1:
+        st.markdown("### TA – Por Empresa")
+        ta_emp = avance_por_grupo(df_f[df_f["TA_Teoria_OK"]], "Empresa", "TA_Teoria_OK", "TA_Practica_OK")
+        st.dataframe(ta_emp, use_container_width=True)
+        st.bar_chart(ta_emp.set_index("Empresa")[["AVANCE_%"]])
+
+if show_ec:
+    with t2:
+        st.markdown("### EC – Por Empresa")
+        ec_emp = avance_por_grupo(df_f[df_f["EC_Teoria_OK"]], "Empresa", "EC_Teoria_OK", "EC_Practica_OK")
+        st.dataframe(ec_emp, use_container_width=True)
+        st.bar_chart(ec_emp.set_index("Empresa")[["AVANCE_%"]])
+
+t3, t4 = st.columns(2)
+
+if show_ta:
+    with t3:
+        st.markdown("### TA – Por Tipo de personal")
+        ta_tipo = avance_por_grupo(df_f[df_f["TA_Teoria_OK"]], "Tipo de personal", "TA_Teoria_OK", "TA_Practica_OK")
+        st.dataframe(ta_tipo, use_container_width=True)
+        st.bar_chart(ta_tipo.set_index("Tipo de personal")[["AVANCE_%"]])
+
+if show_ec:
+    with t4:
+        st.markdown("### EC – Por Tipo de personal")
+        ec_tipo = avance_por_grupo(df_f[df_f["EC_Teoria_OK"]], "Tipo de personal", "EC_Teoria_OK", "EC_Practica_OK")
+        st.dataframe(ec_tipo, use_container_width=True)
+        st.bar_chart(ec_tipo.set_index("Tipo de personal")[["AVANCE_%"]])
+
+st.divider()
+
+# ---------------- Listados operativos + descarga ----------------
+st.markdown("## Listados (filtros por estado y exportación)")
+
 tab1, tab2 = st.columns(2)
 
 if show_ta:
     with tab1:
-        st.markdown("### Operativo TA")
-        estados = sorted(df_f["TA_Estado"].unique())
-        sel = st.multiselect("Estado TA", estados, default=estados)
-        df_ta = df_f[df_f["TA_Estado"].isin(sel)].copy()
+        st.markdown("### Trabajo en Altura (TA)")
+        estados_ta = sorted(df_f["TA_Estado"].unique())
+        sel_ta = st.multiselect("Estado TA", estados_ta, default=estados_ta)
 
+        df_ta = df_f[df_f["TA_Estado"].isin(sel_ta)].copy()
         st.dataframe(
-            df_ta[["Apellido y Nombre","DNI","Puesto","Especialidad","Tipo de personal","Empresa","TA - TEORÍA","TA - PRÁCTICA","TA_Estado"]]
-            .sort_values("Apellido y Nombre"),
+            df_ta[[
+                "Apellido y Nombre","DNI","Puesto","Especialidad",
+                "Tipo de personal","Empresa","TA - TEORÍA","TA - PRÁCTICA","TA_Estado"
+            ]].sort_values("Apellido y Nombre"),
             use_container_width=True
         )
 
-        st.download_button(
-            "Descargar TA (filtrado)",
-            data=to_excel_bytes(df_ta),
-            file_name="Listado_TA_filtrado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        # Certificables TA (sobre filtros actuales)
+        df_ta_cert = df_ta[df_ta["TA_Estado"] == "Teoría + práctica (Certificable)"].copy()
+
+        cA, cB = st.columns(2)
+        with cA:
+            st.download_button(
+                "Descargar TA (filtrado)",
+                data=to_excel_bytes(df_ta, sheet_name="TA_filtrado"),
+                file_name="Listado_TA_filtrado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        with cB:
+            st.download_button(
+                "Descargar TA – Certificables",
+                data=to_excel_bytes(df_ta_cert, sheet_name="TA_certificables"),
+                file_name="TA_certificables.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 if show_ec:
     with tab2:
-        st.markdown("### Operativo EC")
-        estados = sorted(df_f["EC_Estado"].unique())
-        sel = st.multiselect("Estado EC", estados, default=estados)
-        df_ec = df_f[df_f["EC_Estado"].isin(sel)].copy()
+        st.markdown("### Espacios Confinados (EC)")
+        estados_ec = sorted(df_f["EC_Estado"].unique())
+        sel_ec = st.multiselect("Estado EC", estados_ec, default=estados_ec)
 
+        df_ec = df_f[df_f["EC_Estado"].isin(sel_ec)].copy()
         st.dataframe(
-            df_ec[["Apellido y Nombre","DNI","Puesto","Especialidad","Tipo de personal","Empresa","EC - TEORÍA","EC - PRÁCTICA","EC_Estado"]]
-            .sort_values("Apellido y Nombre"),
+            df_ec[[
+                "Apellido y Nombre","DNI","Puesto","Especialidad",
+                "Tipo de personal","Empresa","EC - TEORÍA","EC - PRÁCTICA","EC_Estado"
+            ]].sort_values("Apellido y Nombre"),
             use_container_width=True
         )
 
-        st.download_button(
-            "Descargar EC (filtrado)",
-            data=to_excel_bytes(df_ec),
-            file_name="Listado_EC_filtrado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        # Certificables EC (sobre filtros actuales)
+        df_ec_cert = df_ec[df_ec["EC_Estado"] == "Teoría + práctica (Certificable)"].copy()
+
+        cA, cB = st.columns(2)
+        with cA:
+            st.download_button(
+                "Descargar EC (filtrado)",
+                data=to_excel_bytes(df_ec, sheet_name="EC_filtrado"),
+                file_name="Listado_EC_filtrado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        with cB:
+            st.download_button(
+                "Descargar EC – Certificables",
+                data=to_excel_bytes(df_ec_cert, sheet_name="EC_certificables"),
+                file_name="EC_certificables.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
