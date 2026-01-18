@@ -14,33 +14,23 @@ PENDING_WORDS = {"PENDIENTE", "S/N", "SN", "NO", "N/A", "NA", ""}
 import datetime as dt
 
 def is_done_date(x) -> bool:
-    """True si parece una fecha válida; False si vacío o valores tipo PENDIENTE/SN."""
+    """
+    Devuelve True SOLO si la celda contiene una FECHA real.
+    Todo lo demás (texto, PENDIENTE, S/N, etc.) es False.
+    """
     if pd.isna(x):
         return False
 
-    # Fechas reales (excel suele traer date/datetime o Timestamp)
+    # Fecha real (lo ÚNICO válido)
     if isinstance(x, (pd.Timestamp, dt.date, dt.datetime)):
         return True
 
-    # Strings: intenta parsear si no es PENDIENTE/SN
-    if isinstance(x, str):
-        s = x.strip().upper()
-        if s in PENDING_WORDS:
-            return False
-        try:
-            pd.to_datetime(x, errors="raise")
-            return True
-        except Exception:
-            return False
+    # Excel a veces guarda fechas como número serial
+    if isinstance(x, (int, float)):
+        # descartamos 0 o valores chicos típicos de placeholders
+        return x > 30000  # ~ año 1982 en serial Excel
 
-    # Números: a veces excel trae serial
-    if isinstance(x, (int, float)) and not pd.isna(x):
-        return True
-
-    return False
-    # A veces Excel guarda fechas como serial numérico
-    if isinstance(x, (int, float)) and not pd.isna(x):
-        return True
+    # Todo lo demás (str, etc.) NO es fecha válida
     return False
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
