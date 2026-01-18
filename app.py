@@ -11,12 +11,18 @@ HEADER_ROW = 2  # si tus encabezados están en la fila 3 (con 2 filas arriba de 
 PENDING_WORDS = {"PENDIENTE", "S/N", "SN", "NO", "N/A", "NA", ""}
 
 # ====== HELPERS ======
+import datetime as dt
+
 def is_done_date(x) -> bool:
     """True si parece una fecha válida; False si vacío o valores tipo PENDIENTE/SN."""
     if pd.isna(x):
         return False
-    if isinstance(x, pd.Timestamp):
+
+    # Fechas reales (excel suele traer date/datetime o Timestamp)
+    if isinstance(x, (pd.Timestamp, dt.date, dt.datetime)):
         return True
+
+    # Strings: intenta parsear si no es PENDIENTE/SN
     if isinstance(x, str):
         s = x.strip().upper()
         if s in PENDING_WORDS:
@@ -26,6 +32,12 @@ def is_done_date(x) -> bool:
             return True
         except Exception:
             return False
+
+    # Números: a veces excel trae serial
+    if isinstance(x, (int, float)) and not pd.isna(x):
+        return True
+
+    return False
     # A veces Excel guarda fechas como serial numérico
     if isinstance(x, (int, float)) and not pd.isna(x):
         return True
@@ -94,6 +106,13 @@ except FileNotFoundError:
     st.stop()
 
 df = normalize_df(df_raw)
+with st.expander("Diagnóstico (para verificar lectura del Excel)", expanded=False):
+    st.write("Columnas detectadas:", list(df.columns))
+    st.write("TA_Teoria_OK (True):", int(df["TA_Teoria_OK"].sum()))
+    st.write("TA_Practica_OK (True):", int(df["TA_Practica_OK"].sum()))
+    st.write("EC_Teoria_OK (True):", int(df["EC_Teoria_OK"].sum()))
+    st.write("EC_Practica_OK (True):", int(df["EC_Practica_OK"].sum()))
+    st.dataframe(df[["Apellido y Nombre","DNI","TA - TEORÍA","TA - PRÁCTICA","EC - TEORÍA","EC - PRÁCTICA"]].head(10))
 
 # ====== SIDEBAR (FILTROS GENERALES) ======
 st.sidebar.header("Filtros")
