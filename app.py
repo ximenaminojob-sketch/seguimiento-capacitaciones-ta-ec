@@ -253,7 +253,7 @@ with tab_persona:
         col_logo, col_name = st.columns([1, 6])
 
         with col_logo:
-            if row["Empresa"].strip().upper() == "TEIC - TECHINT E&C":
+            if "TECHINT" in str(row["Empresa"]).upper():
                 st.image("assets/techint.png", width=70)
 
         with col_name:
