@@ -1,15 +1,14 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
+import datetime as dt
 
 st.set_page_config(page_title="Seguimiento TA/EC", layout="wide")
+
+# ====== CSS (look corporativo + cards) ======
 st.markdown("""
 <style>
-/* Título grande y prolijo */
 h1, h2, h3 { letter-spacing: -0.3px; }
-
-/* “Cards” simples */
 .card {
   background: #F3F6FA;
   border: 1px solid #E2E8F0;
@@ -20,8 +19,6 @@ h1, h2, h3 { letter-spacing: -0.3px; }
 .card-title { font-weight: 700; font-size: 14px; color:#0B3A6E; margin-bottom: 6px; }
 .card-kpi { font-size: 28px; font-weight: 800; color:#0B1F33; margin: 0; }
 .card-sub { color:#4B5563; font-size: 13px; margin-top: 4px; }
-
-/* Chips/etiquetas */
 .badge {
   display:inline-block;
   padding: 4px 10px;
@@ -35,42 +32,29 @@ h1, h2, h3 { letter-spacing: -0.3px; }
 .badge-ok { color:#0B3A6E; }
 .badge-warn { color:#B45309; }
 .badge-bad { color:#B91C1C; }
-
-/* Divisor suave */
 hr { border: none; border-top: 1px solid #E5E7EB; margin: 18px 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ====== CONFIG ======
-DATA_PATH = "data/registro_ta_ec.xlsx"   # Excel dentro del repo
-HEADER_ROW = 2  # si tus encabezados están en la fila 3 (con 2 filas arriba de título)
-PENDING_WORDS = {"PENDIENTE", "S/N", "SN", "NO", "N/A", "NA", ""}
+# ====== Config ======
+DATA_PATH = "data/registro_ta_ec.xlsx"
+HEADER_ROW = 2  # si tu encabezado está en la fila 3 (2 filas arriba de título)
 
-# ====== HELPERS ======
-import datetime as dt
-
-def is_done_date(x) -> bool:
-    """
-    Devuelve True SOLO si la celda contiene una FECHA real.
-    Todo lo demás (texto, PENDIENTE, S/N, etc.) es False.
-    """
+# ====== Helpers ======
+def is_real_date(x) -> bool:
+    """True SOLO si es fecha real (date/datetime/timestamp) o serial excel grande."""
     if pd.isna(x):
         return False
-
-    # Fecha real (lo ÚNICO válido)
     if isinstance(x, (pd.Timestamp, dt.date, dt.datetime)):
         return True
-
-    # Excel a veces guarda fechas como número serial
-    if isinstance(x, (int, float)):
-        # descartamos 0 o valores chicos típicos de placeholders
-        return x > 30000  # ~ año 1982 en serial Excel
-
-    # Todo lo demás (str, etc.) NO es fecha válida
+    if isinstance(x, (int, float)) and not pd.isna(x):
+        return x > 30000
     return False
 
+def norm_text(x):
+    return str(x).strip().upper()
+
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-    # Quita columnas basura "Unnamed"
     df = df.loc[:, ~df.columns.astype(str).str.contains(r"^Unnamed", regex=True)].copy()
 
     required = [
@@ -83,8 +67,7 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         st.error(
             f"Faltan columnas en el Excel: {missing}\n\n"
-            f"Tip: si los nombres existen pero igual falla, puede ser el header incorrecto. "
-            f"Probá cambiar HEADER_ROW (header=2 -> header=0) en el código."
+            f"Si existen pero no las detecta: ajustá HEADER_ROW (2, 1 o 0)."
         )
         st.stop()
 
@@ -92,58 +75,73 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["Apellido y Nombre","Puesto","Especialidad","Tipo de personal","Empresa"]:
         df[col] = df[col].astype(str).str.strip()
 
-    # Flags de cumplimiento por tema
-    df["TA_Teoria_OK"] = df["TA - TEORÍA"].apply(is_done_date)
-    df["TA_Practica_OK"] = df["TA - PRÁCTICA"].apply(is_done_date)
-    df["EC_Teoria_OK"] = df["EC - TEORÍA"].apply(is_done_date)
-    df["EC_Practica_OK"] = df["EC - PRÁCTICA"].apply(is_done_date)
+    # Flags: Teoría = fecha real
+    df["TA_Teoria_OK"] = df["TA - TEORÍA"].apply(is_real_date)
+    df["EC_Teoria_OK"] = df["EC - TEORÍA"].apply(is_real_date)
 
-    # Estados (lo que querés ver en la app)
-    def estado(teo_ok, prac_ok):
-        if not teo_ok and not prac_ok:
-            return "Sin teoría ni práctica"
-        if teo_ok and not prac_ok:
-            return "Solo teoría"
+    # Práctica hecha = fecha real
+    df["TA_Practica_OK"] = df["TA - PRÁCTICA"].apply(is_real_date)
+    df["EC_Practica_OK"] = df["EC - PRÁCTICA"].apply(is_real_date)
+
+    # Práctica pendiente (tu regla): SOLO "S/N"
+    df["TA_Practica_Pendiente_SN"] = df["TA - PRÁCTICA"].apply(lambda x: norm_text(x) in {"S/N", "SN"})
+    df["EC_Practica_Pendiente_SN"] = df["EC - PRÁCTICA"].apply(lambda x: norm_text(x) in {"S/N", "SN"})
+
+    # Estados (para mostrar en ficha / tablas)
+    def estado(teo_ok, prac_ok, pend_sn):
         if teo_ok and prac_ok:
-            return "Teoría + práctica (Certificable)"
-        return "Solo práctica (Inconsistencia)"
+            return "CERTIFICABLE"
+        if teo_ok and (not prac_ok) and pend_sn:
+            return "SOLO TEORÍA (Pendiente práctica - S/N)"
+        if teo_ok and (not prac_ok) and (not pend_sn):
+            return "SOLO TEORÍA (Sin práctica cargada)"
+        if (not teo_ok) and prac_ok:
+            return "INCONSISTENCIA (Práctica sin teoría)"
+        return "SIN TEORÍA"
 
-    df["TA_Estado"] = [estado(t, p) for t, p in zip(df["TA_Teoria_OK"], df["TA_Practica_OK"])]
-    df["EC_Estado"] = [estado(t, p) for t, p in zip(df["EC_Teoria_OK"], df["EC_Practica_OK"])]
+    df["TA_Estado"] = [estado(t, p, sn) for t, p, sn in zip(df["TA_Teoria_OK"], df["TA_Practica_OK"], df["TA_Practica_Pendiente_SN"])]
+    df["EC_Estado"] = [estado(t, p, sn) for t, p, sn in zip(df["EC_Teoria_OK"], df["EC_Practica_OK"], df["EC_Practica_Pendiente_SN"])]
 
     return df
 
-def avance_sobre_teoria(dfx: pd.DataFrame, teo_ok_col: str, prac_ok_col: str):
-    """Avance = certificables / base con teoría."""
-    base = int(dfx[teo_ok_col].sum())
-    cert = int((dfx[teo_ok_col] & dfx[prac_ok_col]).sum())
-    pend = int((dfx[teo_ok_col] & ~dfx[prac_ok_col]).sum())
-    pct = (cert / base * 100) if base else 0
-    return base, cert, pend, pct
+def avance_sobre_teoria(dfx: pd.DataFrame, teo_ok: str, prac_ok: str):
+    base = int(dfx[teo_ok].sum())
+    certificables = int((dfx[teo_ok] & dfx[prac_ok]).sum())
+    pendientes = base - certificables
+    pct = (certificables / base * 100) if base else 0
+    return base, certificables, pendientes, pct
 
-# ====== CARGA ======
-st.title("App de Seguimiento – Capacitaciones Teoría/Práctica (TA y EC)")
-st.caption("Base con teoría = personas con fecha en TEORÍA. Certificable = fecha en TEORÍA y PRÁCTICA.")
-
-try:
+@st.cache_data(show_spinner=False)
+def load_data():
     df_raw = pd.read_excel(DATA_PATH, sheet_name=0, header=HEADER_ROW)
-except FileNotFoundError:
-    st.error(f"No se encontró el archivo: {DATA_PATH}. Revisá que exista en el repo.")
-    st.stop()
+    return normalize_df(df_raw)
 
-df = normalize_df(df_raw)
-with st.expander("Diagnóstico (para verificar lectura del Excel)", expanded=False):
-    st.write("Columnas detectadas:", list(df.columns))
-    st.write("TA_Teoria_OK (True):", int(df["TA_Teoria_OK"].sum()))
-    st.write("TA_Practica_OK (True):", int(df["TA_Practica_OK"].sum()))
-    st.write("EC_Teoria_OK (True):", int(df["EC_Teoria_OK"].sum()))
-    st.write("EC_Practica_OK (True):", int(df["EC_Practica_OK"].sum()))
-    st.dataframe(df[["Apellido y Nombre","DNI","TA - TEORÍA","TA - PRÁCTICA","EC - TEORÍA","EC - PRÁCTICA"]].head(10))
+# ====== Header (logo + título) ======
+top_l, top_r = st.columns([1, 3])
+with top_l:
+    # Si ya tenés el logo como imagen en repo, ponelo acá. Si no, borrá este bloque.
+    # st.image("assets/techint.png", width=210)
+    st.write("")
+with top_r:
+    st.markdown("# Seguimiento de Capacitaciones (TA / EC)")
+    st.caption("Avance medido sobre personas con **TEORÍA realizada (fecha)**. Certificable = **Teoría + Práctica (fecha)**.")
 
-# ====== SIDEBAR (FILTROS GENERALES) ======
+# ====== Controles globales ======
+c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
+with c1:
+    modo_oscuro = st.toggle("Modo oscuro", value=False)
+with c2:
+    tema = st.selectbox("Tema", ["Ambos", "TA", "EC"])
+with c3:
+    st.write("")
+with c4:
+    if st.button("🔄 Actualizar datos"):
+        st.cache_data.clear()
+
+df = load_data()
+
+# Filtros laterales (tipo/empresa)
 st.sidebar.header("Filtros")
-tema = st.sidebar.selectbox("Tema", ["Ambos", "TA (Trabajo en Altura)", "EC (Espacios Confinados)"])
-
 tipo_opts = sorted(df["Tipo de personal"].unique())
 empresa_opts = sorted(df["Empresa"].unique())
 
@@ -152,129 +150,161 @@ empresa_sel = st.sidebar.multiselect("Empresa / Subcontrato", empresa_opts, defa
 
 df_f = df[df["Tipo de personal"].isin(tipo_sel) & df["Empresa"].isin(empresa_sel)].copy()
 
-show_ta = tema in ["Ambos", "TA (Trabajo en Altura)"]
-show_ec = tema in ["Ambos", "EC (Espacios Confinados)"]
+if df_f.empty:
+    st.warning("Con los filtros actuales no hay registros para mostrar. Probá seleccionar más empresas/tipos.")
+    st.stop()
 
-# =========================
-# 1) TABLERO + GRAFICOS
-# =========================
-st.markdown("## 1) Tablero de avance y gráficos")
+show_ta = tema in ["Ambos", "TA"]
+show_ec = tema in ["Ambos", "EC"]
 
-c1, c2 = st.columns(2)
+# ====== Tabs ======
+tab_dash, tab_persona, tab_empresa = st.tabs(["📊 Dashboard", "🔎 Buscar persona", "🏢 Por empresa"])
 
-if show_ta:
-    base, cert, pend, pct = avance_sobre_teoria(df_f, "TA_Teoria_OK", "TA_Practica_OK")
-    with c1:
-        st.subheader("TA – Trabajo en Altura")
-        a,b,c = st.columns(3)
-        a.metric("Base con teoría", base)
-        b.metric("Certificables", cert)
-        c.metric("Pendientes práctica", pend)
-        st.metric("% Avance (cert/base)", f"{pct:.1f}%")
-        st.progress(min(int(round(pct)), 100))
-        chart = pd.DataFrame({"Personas": [cert, pend]}, index=["Certificables", "Pendientes práctica"])
-        st.bar_chart(chart)
+# ======================
+# TAB 1: DASHBOARD
+# ======================
+with tab_dash:
+    st.markdown("## Tablero de avance")
 
-if show_ec:
-    base, cert, pend, pct = avance_sobre_teoria(df_f, "EC_Teoria_OK", "EC_Practica_OK")
-    with c2:
-        st.subheader("EC – Espacios Confinados")
-        a,b,c = st.columns(3)
-        a.metric("Base con teoría", base)
-        b.metric("Certificables", cert)
-        c.metric("Pendientes práctica", pend)
-        st.metric("% Avance (cert/base)", f"{pct:.1f}%")
-        st.progress(min(int(round(pct)), 100))
-        chart = pd.DataFrame({"Personas": [cert, pend]}, index=["Certificables", "Pendientes práctica"])
-        st.bar_chart(chart)
+    colA, colB = st.columns(2)
 
-st.divider()
+    if show_ta:
+        base, cert, pend, pct = avance_sobre_teoria(df_f, "TA_Teoria_OK", "TA_Practica_OK")
+        with colA:
+            st.markdown(f"""
+<div class="card">
+  <div class="card-title">TA – Trabajo en Altura</div>
+  <div class="badge badge-ok">Base teoría: {base}</div>
+  <div class="badge badge-ok">Certificables: {cert}</div>
+  <div class="badge badge-warn">Pendientes: {pend}</div>
+  <p class="card-kpi">{pct:.1f}%</p>
+  <div class="card-sub">% Avance (certificables / base con teoría)</div>
+</div>
+""", unsafe_allow_html=True)
+            st.progress(min(int(round(pct)), 100))
 
-# =========================
-# 2) BUSCAR PERSONA
-# =========================
-st.markdown("## 2) Buscar persona (ver qué capacitaciones tiene hechas)")
+            chart_ta = pd.DataFrame({"Personas": [cert, pend]}, index=["Certificables", "Pendientes"])
+            st.bar_chart(chart_ta)
 
-q = st.text_input("Buscar por DNI o Apellido y Nombre", "")
+    if show_ec:
+        base, cert, pend, pct = avance_sobre_teoria(df_f, "EC_Teoria_OK", "EC_Practica_OK")
+        with colB:
+            st.markdown(f"""
+<div class="card">
+  <div class="card-title">EC – Espacios Confinados</div>
+  <div class="badge badge-ok">Base teoría: {base}</div>
+  <div class="badge badge-ok">Certificables: {cert}</div>
+  <div class="badge badge-warn">Pendientes: {pend}</div>
+  <p class="card-kpi">{pct:.1f}%</p>
+  <div class="card-sub">% Avance (certificables / base con teoría)</div>
+</div>
+""", unsafe_allow_html=True)
+            st.progress(min(int(round(pct)), 100))
 
-if q.strip():
-    qq = q.strip().lower()
-    df_persona = df_f[
-        df_f["DNI"].astype(str).str.lower().str.contains(qq) |
-        df_f["Apellido y Nombre"].astype(str).str.lower().str.contains(qq)
-    ].copy()
+            chart_ec = pd.DataFrame({"Personas": [cert, pend]}, index=["Certificables", "Pendientes"])
+            st.bar_chart(chart_ec)
 
-    if df_persona.empty:
-        st.warning("No se encontraron personas con esa búsqueda (con los filtros actuales).")
+    st.markdown("---")
+    st.caption("Tip: si filtrás por una empresa que no tiene teoría cargada, el avance queda en 0 porque la base se define por fecha en TEORÍA.")
+
+# ======================
+# TAB 2: BUSCAR PERSONA
+# ======================
+with tab_persona:
+    st.markdown("## Buscar una persona")
+    st.caption("Seleccioná por DNI o por Apellido y Nombre para ver su estado en TA y EC.")
+
+    modo_busqueda = st.radio("Buscar por", ["DNI", "Nombre y Apellido"], horizontal=True)
+
+    if modo_busqueda == "DNI":
+        opciones = sorted(df_f["DNI"].unique())
+        sel = st.selectbox("DNI", ["— Seleccioná —"] + opciones)
+        if sel != "— Seleccioná —":
+            row = df_f[df_f["DNI"] == sel].iloc[0]
+        else:
+            row = None
     else:
-        # Mostramos "ficha" resumida
-        for _, r in df_persona.head(10).iterrows():
-            st.markdown(f"### {r['Apellido y Nombre']} — DNI {r['DNI']}")
-            cols = st.columns(4)
-            cols[0].write(f"**Tipo:** {r['Tipo de personal']}")
-            cols[1].write(f"**Empresa:** {r['Empresa']}")
-            cols[2].write(f"**Puesto:** {r['Puesto']}")
-            cols[3].write(f"**Especialidad:** {r['Especialidad']}")
+        opciones = sorted(df_f["Apellido y Nombre"].unique())
+        sel = st.selectbox("Nombre y Apellido", ["— Seleccioná —"] + opciones)
+        if sel != "— Seleccioná —":
+            row = df_f[df_f["Apellido y Nombre"] == sel].iloc[0]
+        else:
+            row = None
 
-            t1, t2 = st.columns(2)
-            with t1:
-                st.markdown("**TA (Trabajo en Altura)**")
-                st.write(f"Teoría: {r['TA - TEORÍA']}")
-                st.write(f"Práctica: {r['TA - PRÁCTICA']}")
-                st.success(r["TA_Estado"]) if "Certificable" in r["TA_Estado"] else st.info(r["TA_Estado"])
-            with t2:
-                st.markdown("**EC (Espacios Confinados)**")
-                st.write(f"Teoría: {r['EC - TEORÍA']}")
-                st.write(f"Práctica: {r['EC - PRÁCTICA']}")
-                st.success(r["EC_Estado"]) if "Certificable" in r["EC_Estado"] else st.info(r["EC_Estado"])
+    if row is None:
+        st.info("Elegí un DNI o un Nombre para comenzar.")
+    else:
+        st.markdown(f"### {row['Apellido y Nombre']}  —  DNI {row['DNI']}")
+        st.caption(f"{row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}")
 
-            st.markdown("---")
-else:
-    st.info("Escribí un DNI o un nombre para ver el detalle de esa persona.")
+        cta, cec = st.columns(2)
 
-st.divider()
+        if show_ta or tema == "TA":
+            with cta:
+                st.markdown("#### TA – Trabajo en Altura")
+                st.write(f"Teoría: **{row['TA - TEORÍA']}**")
+                st.write(f"Práctica: **{row['TA - PRÁCTICA']}**")
+                estado = row["TA_Estado"]
+                if "CERTIFICABLE" in estado:
+                    st.success(estado)
+                elif "SOLO TEORÍA" in estado:
+                    st.warning(estado)
+                else:
+                    st.info(estado)
 
-# =========================
-# 3) LISTADO POR EMPRESA / SUBCONTRATO
-# =========================
-st.markdown("## 3) Listar por Empresa/Subcontrato (ver quién tiene o no hechas las capacitaciones)")
+        if show_ec or tema == "EC":
+            with cec:
+                st.markdown("#### EC – Espacios Confinados")
+                st.write(f"Teoría: **{row['EC - TEORÍA']}**")
+                st.write(f"Práctica: **{row['EC - PRÁCTICA']}**")
+                estado = row["EC_Estado"]
+                if "CERTIFICABLE" in estado:
+                    st.success(estado)
+                elif "SOLO TEORÍA" in estado:
+                    st.warning(estado)
+                else:
+                    st.info(estado)
 
-empresa_list = st.selectbox("Elegí una Empresa/Subcontrato para listar", ["(Seleccionar)"] + empresa_opts)
+# ======================
+# TAB 3: POR EMPRESA
+# ======================
+with tab_empresa:
+    st.markdown("## Seguimiento por Empresa / Subcontrato")
+    empresa = st.selectbox("Elegí una empresa", sorted(df_f["Empresa"].unique()))
 
-if empresa_list != "(Seleccionar)":
-    df_emp = df_f[df_f["Empresa"] == empresa_list].copy()
+    df_emp = df_f[df_f["Empresa"] == empresa].copy()
+    st.markdown(f"### {empresa} — Personas: {len(df_emp)}")
 
-    st.write(f"Personas encontradas: **{len(df_emp)}**")
-
-    # Resumen rápido por tema dentro de esa empresa
     s1, s2 = st.columns(2)
-
     if show_ta:
         base, cert, pend, pct = avance_sobre_teoria(df_emp, "TA_Teoria_OK", "TA_Practica_OK")
         with s1:
-            st.subheader("Resumen TA en la empresa")
-            st.write(f"- Base con teoría: **{base}**")
-            st.write(f"- Certificables: **{cert}**")
-            st.write(f"- Pendientes práctica: **{pend}**")
-            st.write(f"- % Avance: **{pct:.1f}%**")
+            st.markdown(f"""
+<div class="card">
+  <div class="card-title">TA – Avance en {empresa}</div>
+  <div class="badge badge-ok">Base teoría: {base}</div>
+  <div class="badge badge-ok">Certificables: {cert}</div>
+  <div class="badge badge-warn">Pendientes: {pend}</div>
+  <p class="card-kpi">{pct:.1f}%</p>
+</div>
+""", unsafe_allow_html=True)
 
     if show_ec:
         base, cert, pend, pct = avance_sobre_teoria(df_emp, "EC_Teoria_OK", "EC_Practica_OK")
         with s2:
-            st.subheader("Resumen EC en la empresa")
-            st.write(f"- Base con teoría: **{base}**")
-            st.write(f"- Certificables: **{cert}**")
-            st.write(f"- Pendientes práctica: **{pend}**")
-            st.write(f"- % Avance: **{pct:.1f}%**")
+            st.markdown(f"""
+<div class="card">
+  <div class="card-title">EC – Avance en {empresa}</div>
+  <div class="badge badge-ok">Base teoría: {base}</div>
+  <div class="badge badge-ok">Certificables: {cert}</div>
+  <div class="badge badge-warn">Pendientes: {pend}</div>
+  <p class="card-kpi">{pct:.1f}%</p>
+</div>
+""", unsafe_allow_html=True)
 
-    # Tabla operativa: ver estados por persona
-    st.markdown("### Listado de personas (con estados TA y EC)")
-    st.dataframe(
-        df_emp[[
-            "Apellido y Nombre","DNI","Tipo de personal","Empresa","Puesto","Especialidad",
-            "TA_Estado","EC_Estado","TA - TEORÍA","TA - PRÁCTICA","EC - TEORÍA","EC - PRÁCTICA"
-        ]].sort_values("Apellido y Nombre"),
-        use_container_width=True
-    )
-else:
-    st.info("Elegí una Empresa/Subcontrato para listar a su personal.")
+    st.markdown("### Listado")
+    cols = [
+        "Apellido y Nombre","DNI","Tipo de personal","Empresa","Puesto","Especialidad",
+        "TA_Estado","EC_Estado","TA - TEORÍA","TA - PRÁCTICA","EC - TEORÍA","EC - PRÁCTICA"
+    ]
+    st.dataframe(df_emp[cols].sort_values("Apellido y Nombre"), use_container_width=True)
