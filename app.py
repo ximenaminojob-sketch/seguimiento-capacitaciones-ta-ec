@@ -3,6 +3,15 @@ import pandas as pd
 import numpy as np
 import datetime as dt
 
+def fmt_fecha(x):
+    if pd.isna(x):
+        return "—"
+    if isinstance(x, (pd.Timestamp, dt.date, dt.datetime)):
+        return x.strftime("%d/%m/%Y")
+    if str(x).strip().upper() == "S/N":
+        return "S/N"
+    return str(x)
+
 st.set_page_config(page_title="Seguimiento TA/EC", layout="wide")
 
 # ====== CSS (look corporativo + cards) ======
@@ -242,8 +251,8 @@ with tab_persona:
         if show_ta or tema == "TA":
             with cta:
                 st.markdown("#### TA – Trabajo en Altura")
-                st.write(f"Teoría: **{row['TA - TEORÍA']}**")
-                st.write(f"Práctica: **{row['TA - PRÁCTICA']}**")
+                st.write(f"Teoría: **{fmt_fecha(row['TA - TEORÍA'])}**")
+                st.write(f"Práctica: **{fmt_fecha(row['TA - PRÁCTICA'])}**")
                 estado = row["TA_Estado"]
                 if "CERTIFICABLE" in estado:
                     st.success(estado)
