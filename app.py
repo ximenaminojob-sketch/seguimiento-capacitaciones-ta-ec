@@ -225,61 +225,28 @@ with tab_persona:
 
     modo_busqueda = st.radio("Buscar por", ["DNI", "Nombre y Apellido"], horizontal=True)
 
-    if modo_busqueda == "DNI":
-        opciones = sorted(df_f["DNI"].unique())
-        sel = st.selectbox("DNI", ["— Seleccioná —"] + opciones)
-        if sel != "— Seleccioná —":
-            row = df_f[df_f["DNI"] == sel].iloc[0]
-        else:
-            row = None
-    else:
-        opciones = sorted(df_f["Apellido y Nombre"].unique())
-        sel = st.selectbox("Nombre y Apellido", ["— Seleccioná —"] + opciones)
-        if sel != "— Seleccioná —":
-            row = df_f[df_f["Apellido y Nombre"] == sel].iloc[0]
-        else:
-            row = None
+    # ... (selección de persona)
+    # row = ...
 
     if row is None:
         st.info("Elegí un DNI o un Nombre para comenzar.")
     else:
-        col_logo, col_name = st.columns([1, 6])
+        st.markdown(f"### {row['Apellido y Nombre']}  —  DNI {row['DNI']}")
+        st.caption(f"{row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}")
 
-with col_logo:
-    if row["Empresa"].strip().upper() == "TEIC - TECHINT E&C":
-        st.image("assets/techint.png", width=70)
+        cta, cec = st.columns(2)   # <-- ESTA LÍNEA
 
-with col_name:
-    st.markdown(f"### {row['Apellido y Nombre']}  —  DNI {row['DNI']}")
-    st.caption(f"{row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}")
-        
-        cta, cec = st.columns(2)
+        with cta:
+            st.markdown("#### TA – Trabajo en Altura")
+            st.write(f"Teoría: **{fmt_fecha(row['TA - TEORÍA'])}**")
+            st.write(f"Práctica: **{fmt_fecha(row['TA - PRÁCTICA'])}**")
+            # ...
 
-        if show_ta or tema == "TA":
-            with cta:
-                st.markdown("#### TA – Trabajo en Altura")
-                st.write(f"Teoría: **{fmt_fecha(row['TA - TEORÍA'])}**")
-                st.write(f"Práctica: **{fmt_fecha(row['TA - PRÁCTICA'])}**")
-                estado = row["TA_Estado"]
-                if "CERTIFICABLE" in estado:
-                    st.success(estado)
-                elif "SOLO TEORÍA" in estado:
-                    st.warning(estado)
-                else:
-                    st.info(estado)
-
-        if show_ec or tema == "EC":
-            with cec:
-                st.markdown("#### EC – Espacios Confinados")
-                st.write(f"Teoría: **{fmt_fecha(row['EC - TEORÍA'])}**")
-                st.write(f"Práctica: **{fmt_fecha(row['EC - PRÁCTICA'])}**")
-                estado = row["EC_Estado"]
-                if "CERTIFICABLE" in estado:
-                    st.success(estado)
-                elif "SOLO TEORÍA" in estado:
-                    st.warning(estado)
-                else:
-                    st.info(estado)
+        with cec:
+            st.markdown("#### EC – Espacios Confinados")
+            st.write(f"Teoría: **{fmt_fecha(row['EC - TEORÍA'])}**")
+            st.write(f"Práctica: **{fmt_fecha(row['EC - PRÁCTICA'])}**")
+            # ...
 
 # ======================
 # TAB 3: POR EMPRESA
