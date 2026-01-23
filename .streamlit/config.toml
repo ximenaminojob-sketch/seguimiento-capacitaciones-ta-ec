@@ -1,0 +1,7 @@
+[theme]
+# Ajustá estos hex a los corporativos exactos si los tenés:
+primaryColor = "#0B3A6E"                # Azul Techint-like
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F6FA"    # Gris muy suave
+textColor = "#0B1F33"                   # Texto oscuro
+font = "sans serif"
