@@ -251,29 +251,29 @@ with tab_persona:
     else:
         # (Acá va tu encabezado con logo + nombre)
         empresa_txt = str(row.get("Empresa", "")).upper()
+        
+        logo_html = ""
+        if "TECHINT" in empresa_txt:
+            logo_html = """
+            <img src="https://raw.githubusercontent.com/ximenaminojob-sketch/seguimiento-capacitaciones-ta-ec/main/assets/techint.png"
+                 style="height:75px; width:auto; object-fit:contain;" />
+            """
 
-logo_html = ""
-if "TECHINT" in empresa_txt:
-    logo_html = """
-    <img src="https://raw.githubusercontent.com/ximenaminojob-sketch/seguimiento-capacitaciones-ta-ec/main/assets/techint.png"
-         style="height:75px; width:auto; object-fit:contain;" />
-    """
-
-st.markdown(f"""
-<div style="display:flex; align-items:center; gap:18px; margin-top:12px;">
-  <div style="min-width:90px; display:flex; justify-content:center;">
-    {logo_html}
-  </div>
-  <div>
-    <div style="font-size:28px; font-weight:800; line-height:1.1;">
-      {row['Apellido y Nombre']} — DNI {row['DNI']}
-    </div>
-    <div style="color:#6B7280; margin-top:6px;">
-      {row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style="display:flex; align-items:center; gap:18px; margin-top:12px;">
+          <div style="min-width:90px; display:flex; justify-content:center;">
+             {logo_html}
+          </div>
+          <div>
+            <div style="font-size:28px; font-weight:800; line-height:1.1;">
+              {row['Apellido y Nombre']} — DNI {row['DNI']}
+            </div>
+            <div style="color:#6B7280; margin-top:6px;">
+              {row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}
+            </div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True
 
         cta, cec = st.columns(2)
 
