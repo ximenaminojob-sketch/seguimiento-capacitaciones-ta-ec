@@ -264,8 +264,8 @@ with tab_persona:
         if show_ec or tema == "EC":
             with cec:
                 st.markdown("#### EC – Espacios Confinados")
-                st.write(f"Teoría: **{row['EC - TEORÍA']}**")
-                st.write(f"Práctica: **{row['EC - PRÁCTICA']}**")
+                st.write(f"Teoría: **{fmt_fecha(row['EC - TEORÍA'])}**")
+                st.write(f"Práctica: **{fmt_fecha(row['EC - PRÁCTICA'])}**")
                 estado = row["EC_Estado"]
                 if "CERTIFICABLE" in estado:
                     st.success(estado)
