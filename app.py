@@ -4,6 +4,42 @@ import pandas as pd
 import numpy as np
 
 st.set_page_config(page_title="Seguimiento TA/EC", layout="wide")
+st.markdown("""
+<style>
+/* Título grande y prolijo */
+h1, h2, h3 { letter-spacing: -0.3px; }
+
+/* “Cards” simples */
+.card {
+  background: #F3F6FA;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+.card-title { font-weight: 700; font-size: 14px; color:#0B3A6E; margin-bottom: 6px; }
+.card-kpi { font-size: 28px; font-weight: 800; color:#0B1F33; margin: 0; }
+.card-sub { color:#4B5563; font-size: 13px; margin-top: 4px; }
+
+/* Chips/etiquetas */
+.badge {
+  display:inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  margin-right: 6px;
+}
+.badge-ok { color:#0B3A6E; }
+.badge-warn { color:#B45309; }
+.badge-bad { color:#B91C1C; }
+
+/* Divisor suave */
+hr { border: none; border-top: 1px solid #E5E7EB; margin: 18px 0; }
+</style>
+""", unsafe_allow_html=True)
 
 # ====== CONFIG ======
 DATA_PATH = "data/registro_ta_ec.xlsx"   # Excel dentro del repo
