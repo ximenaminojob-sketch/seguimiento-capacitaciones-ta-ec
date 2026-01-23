@@ -243,9 +243,16 @@ with tab_persona:
     if row is None:
         st.info("Elegí un DNI o un Nombre para comenzar.")
     else:
-        st.markdown(f"### {row['Apellido y Nombre']}  —  DNI {row['DNI']}")
-        st.caption(f"{row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}")
+        col_logo, col_name = st.columns([1, 6])
 
+with col_logo:
+    if row["Empresa"].strip().upper() == "TEIC - TECHINT E&C":
+        st.image("assets/techint.png", width=70)
+
+with col_name:
+    st.markdown(f"### {row['Apellido y Nombre']}  —  DNI {row['DNI']}")
+    st.caption(f"{row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}")
+        
         cta, cec = st.columns(2)
 
         if show_ta or tema == "TA":
