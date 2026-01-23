@@ -1,20 +1,45 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime as dt
 
-def fmt_fecha(x):
-    if pd.isna(x):
-        return "—"
-    if isinstance(x, (pd.Timestamp, dt.date, dt.datetime)):
-        return x.strftime("%d/%m/%Y")
-    if str(x).strip().upper() == "S/N":
-        return "S/N"
-    return str(x)
-
 st.set_page_config(page_title="Seguimiento TA/EC", layout="wide")
 
-# ====== CSS (look corporativo + cards) ======
+# =========================
+# CONFIG
+# =========================
+DATA_PATH = "data/registro_ta_ec.xlsx"
+HEADER_ROW = 2  # si tus encabezados están en la fila 3 (dos filas de título arriba)
+
+# =========================
+# THEME (modo oscuro por CSS)
+# =========================
+CSS_LIGHT = """
+<style>
+:root { color-scheme: light; }
+html, body, [data-testid="stAppViewContainer"] { background: #FFFFFF !important; }
+[data-testid="stSidebar"] { background: #F3F6FA !important; }
+hr { border: none; border-top: 1px solid #E5E7EB; margin: 18px 0; }
+</style>
+"""
+
+CSS_DARK = """
+<style>
+:root { color-scheme: dark; }
+html, body, [data-testid="stAppViewContainer"] {
+    background: #0E1117 !important;
+    color: #E6E6E6 !important;
+}
+[data-testid="stSidebar"] { background: #0B1220 !important; }
+h1,h2,h3,p,span,div,label { color: #E6E6E6 !important; }
+hr { border: none; border-top: 1px solid #23314D; margin: 18px 0; }
+</style>
+"""
+
+# =========================
+# UI CSS (cards, badges)
+# =========================
 st.markdown("""
 <style>
 h1, h2, h3 { letter-spacing: -0.3px; }
@@ -41,15 +66,28 @@ h1, h2, h3 { letter-spacing: -0.3px; }
 .badge-ok { color:#0B3A6E; }
 .badge-warn { color:#B45309; }
 .badge-bad { color:#B91C1C; }
-hr { border: none; border-top: 1px solid #E5E7EB; margin: 18px 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ====== Config ======
-DATA_PATH = "data/registro_ta_ec.xlsx"
-HEADER_ROW = 2  # si tu encabezado está en la fila 3 (2 filas arriba de título)
+# =========================
+# HELPERS
+# =========================
+def fmt_fecha(x):
+    """Muestra solo DD/MM/YYYY si es fecha real. Si no, devuelve el texto (S/N, etc.)."""
+    if pd.isna(x):
+        return "—"
+    if isinstance(x, (pd.Timestamp, dt.date, dt.datetime)):
+        return x.strftime("%d/%m/%Y")
+    # Si viene como serial excel
+    if isinstance(x, (int, float)) and not pd.isna(x) and x > 30000:
+        try:
+            d = pd.to_datetime(x, unit="D", origin="1899-12-30")
+            return d.strftime("%d/%m/%Y")
+        except Exception:
+            return str(x)
+    s = str(x).strip()
+    return s if s else "—"
 
-# ====== Helpers ======
 def is_real_date(x) -> bool:
     """True SOLO si es fecha real (date/datetime/timestamp) o serial excel grande."""
     if pd.isna(x):
@@ -60,7 +98,7 @@ def is_real_date(x) -> bool:
         return x > 30000
     return False
 
-def norm_text(x):
+def norm_text(x) -> str:
     return str(x).strip().upper()
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -76,33 +114,33 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         st.error(
             f"Faltan columnas en el Excel: {missing}\n\n"
-            f"Si existen pero no las detecta: ajustá HEADER_ROW (2, 1 o 0)."
+            f"Si existen pero no las detecta: cambiá HEADER_ROW (2, 1 o 0) según dónde estén los encabezados."
         )
         st.stop()
 
+    # Limpieza y NaNs
     df["DNI"] = df["DNI"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
     for col in ["Apellido y Nombre","Puesto","Especialidad","Tipo de personal","Empresa"]:
         df[col] = df[col].astype(str).str.strip()
+        df[col] = df[col].replace({"nan": "SIN DATO", "NaN": "SIN DATO", "None": "SIN DATO"}).fillna("SIN DATO")
 
-    # Flags: Teoría = fecha real
+    # Flags (base = teoría con FECHA)
     df["TA_Teoria_OK"] = df["TA - TEORÍA"].apply(is_real_date)
     df["EC_Teoria_OK"] = df["EC - TEORÍA"].apply(is_real_date)
-
-    # Práctica hecha = fecha real
     df["TA_Practica_OK"] = df["TA - PRÁCTICA"].apply(is_real_date)
     df["EC_Practica_OK"] = df["EC - PRÁCTICA"].apply(is_real_date)
 
-    # Práctica pendiente (tu regla): SOLO "S/N"
+    # Pendiente práctica: SOLO S/N (tu regla)
     df["TA_Practica_Pendiente_SN"] = df["TA - PRÁCTICA"].apply(lambda x: norm_text(x) in {"S/N", "SN"})
     df["EC_Practica_Pendiente_SN"] = df["EC - PRÁCTICA"].apply(lambda x: norm_text(x) in {"S/N", "SN"})
 
-    # Estados (para mostrar en ficha / tablas)
+    # Estados para mostrar
     def estado(teo_ok, prac_ok, pend_sn):
         if teo_ok and prac_ok:
             return "CERTIFICABLE"
         if teo_ok and (not prac_ok) and pend_sn:
             return "SOLO TEORÍA (Pendiente práctica - S/N)"
-        if teo_ok and (not prac_ok) and (not pend_sn):
+        if teo_ok and (not prac_ok):
             return "SOLO TEORÍA (Sin práctica cargada)"
         if (not teo_ok) and prac_ok:
             return "INCONSISTENCIA (Práctica sin teoría)"
@@ -125,34 +163,40 @@ def load_data():
     df_raw = pd.read_excel(DATA_PATH, sheet_name=0, header=HEADER_ROW)
     return normalize_df(df_raw)
 
-# ====== Header (logo + título) ======
-top_l, top_r = st.columns([1, 3])
+# =========================
+# HEADER (título + controles)
+# =========================
+top_l, top_mid, top_r = st.columns([1.2, 2.2, 1.2])
+
 with top_l:
-    # Si ya tenés el logo como imagen en repo, ponelo acá. Si no, borrá este bloque.
-    # st.image("assets/techint.png", width=210)
-    st.write("")
-with top_r:
-    st.markdown("# Seguimiento de Capacitaciones (TA / EC)")
+    modo_oscuro = st.toggle("Modo oscuro", value=False)
+
+# aplica CSS según toggle
+st.markdown(CSS_DARK if modo_oscuro else CSS_LIGHT, unsafe_allow_html=True)
+
+with top_mid:
+    st.markdown("## Seguimiento de Capacitaciones (TA / EC)")
     st.caption("Avance medido sobre personas con **TEORÍA realizada (fecha)**. Certificable = **Teoría + Práctica (fecha)**.")
 
-# ====== Controles globales ======
-c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
-with c1:
-    modo_oscuro = st.toggle("Modo oscuro", value=False)
-with c2:
-    tema = st.selectbox("Tema", ["Ambos", "TA", "EC"])
-with c3:
-    st.write("")
-with c4:
+with top_r:
     if st.button("🔄 Actualizar datos"):
         st.cache_data.clear()
+        st.rerun()
 
+tema = st.selectbox("Tema", ["Ambos", "TA", "EC"])
+
+# =========================
+# LOAD DATA
+# =========================
 df = load_data()
 
-# Filtros laterales (tipo/empresa)
+# =========================
+# SIDEBAR FILTERS
+# =========================
 st.sidebar.header("Filtros")
-tipo_opts = sorted(df["Tipo de personal"].unique())
-empresa_opts = sorted(df["Empresa"].unique())
+
+tipo_opts = sorted(df["Tipo de personal"].dropna().astype(str).unique())
+empresa_opts = sorted(df["Empresa"].dropna().astype(str).unique())
 
 tipo_sel = st.sidebar.multiselect("Tipo de personal", tipo_opts, default=tipo_opts)
 empresa_sel = st.sidebar.multiselect("Empresa / Subcontrato", empresa_opts, default=empresa_opts)
@@ -166,20 +210,22 @@ if df_f.empty:
 show_ta = tema in ["Ambos", "TA"]
 show_ec = tema in ["Ambos", "EC"]
 
-# ====== Tabs ======
+# =========================
+# TABS
+# =========================
 tab_dash, tab_persona, tab_empresa = st.tabs(["📊 Dashboard", "🔎 Buscar persona", "🏢 Por empresa"])
 
-# ======================
+# =========================
 # TAB 1: DASHBOARD
-# ======================
+# =========================
 with tab_dash:
-    st.markdown("## Tablero de avance")
+    st.markdown("### Tablero de avance y gráficos")
 
-    colA, colB = st.columns(2)
+    c1, c2 = st.columns(2)
 
     if show_ta:
         base, cert, pend, pct = avance_sobre_teoria(df_f, "TA_Teoria_OK", "TA_Practica_OK")
-        with colA:
+        with c1:
             st.markdown(f"""
 <div class="card">
   <div class="card-title">TA – Trabajo en Altura</div>
@@ -191,13 +237,12 @@ with tab_dash:
 </div>
 """, unsafe_allow_html=True)
             st.progress(min(int(round(pct)), 100))
-
             chart_ta = pd.DataFrame({"Personas": [cert, pend]}, index=["Certificables", "Pendientes"])
             st.bar_chart(chart_ta)
 
     if show_ec:
         base, cert, pend, pct = avance_sobre_teoria(df_f, "EC_Teoria_OK", "EC_Practica_OK")
-        with colB:
+        with c2:
             st.markdown(f"""
 <div class="card">
   <div class="card-title">EC – Espacios Confinados</div>
@@ -209,24 +254,21 @@ with tab_dash:
 </div>
 """, unsafe_allow_html=True)
             st.progress(min(int(round(pct)), 100))
-
             chart_ec = pd.DataFrame({"Personas": [cert, pend]}, index=["Certificables", "Pendientes"])
             st.bar_chart(chart_ec)
 
     st.markdown("---")
     st.caption("Tip: si filtrás por una empresa que no tiene teoría cargada, el avance queda en 0 porque la base se define por fecha en TEORÍA.")
 
-# ======================
+# =========================
 # TAB 2: BUSCAR PERSONA
-# ======================
-
+# =========================
 with tab_persona:
-    st.markdown("## Buscar una persona")
+    st.markdown("### Buscar una persona")
     st.caption("Seleccioná por DNI o por Apellido y Nombre para ver su estado en TA y EC.")
 
     modo_busqueda = st.radio("Buscar por", ["DNI", "Nombre y Apellido"], horizontal=True)
-
-    row = None  # ✅ IMPORTANTÍSIMO: evita NameError
+    row = None
 
     if modo_busqueda == "DNI":
         opciones = sorted(df_f["DNI"].dropna().astype(str).unique())
@@ -236,7 +278,6 @@ with tab_persona:
             fila = df_f[df_f["DNI"].astype(str) == sel]
             if not fila.empty:
                 row = fila.iloc[0]
-
     else:
         opciones = sorted(df_f["Apellido y Nombre"].dropna().astype(str).unique())
         sel = st.selectbox("Nombre y Apellido", ["— Seleccioná —"] + opciones)
@@ -249,31 +290,31 @@ with tab_persona:
     if row is None:
         st.info("Elegí un DNI o un Nombre para comenzar.")
     else:
-        # (Acá va tu encabezado con logo + nombre)
         empresa_txt = str(row.get("Empresa", "")).upper()
-        
+
         logo_html = ""
         if "TECHINT" in empresa_txt:
+            # Logo alineado y a la par del nombre (flex)
             logo_html = """
             <img src="https://raw.githubusercontent.com/ximenaminojob-sketch/seguimiento-capacitaciones-ta-ec/main/assets/techint.png"
                  style="height:75px; width:auto; object-fit:contain;" />
             """
 
         st.markdown(f"""
-        <div style="display:flex; align-items:center; gap:18px; margin-top:12px;">
-          <div style="min-width:90px; display:flex; justify-content:center;">
-             {logo_html}
-          </div>
-          <div>
-            <div style="font-size:28px; font-weight:800; line-height:1.1;">
-              {row['Apellido y Nombre']} — DNI {row['DNI']}
-            </div>
-            <div style="color:#6B7280; margin-top:6px;">
-              {row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}
-            </div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True
+<div style="display:flex; align-items:center; gap:18px; margin-top:12px;">
+  <div style="min-width:90px; display:flex; justify-content:center;">
+    {logo_html}
+  </div>
+  <div>
+    <div style="font-size:28px; font-weight:800; line-height:1.1;">
+      {row['Apellido y Nombre']} — DNI {row['DNI']}
+    </div>
+    <div style="color:#6B7280; margin-top:6px;">
+      {row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
         cta, cec = st.columns(2)
 
@@ -301,17 +342,19 @@ with tab_persona:
             else:
                 st.info(estado if estado else "SIN DATOS")
 
-# ======================
+# =========================
 # TAB 3: POR EMPRESA
-# ======================
+# =========================
 with tab_empresa:
-    st.markdown("## Seguimiento por Empresa / Subcontrato")
-    empresa = st.selectbox("Elegí una empresa", sorted(df_f["Empresa"].unique()))
+    st.markdown("### Seguimiento por Empresa / Subcontrato")
 
-    df_emp = df_f[df_f["Empresa"] == empresa].copy()
-    st.markdown(f"### {empresa} — Personas: {len(df_emp)}")
+    empresa = st.selectbox("Elegí una empresa", sorted(df_f["Empresa"].dropna().astype(str).unique()))
+    df_emp = df_f[df_f["Empresa"].astype(str) == empresa].copy()
+
+    st.markdown(f"**{empresa}** — Personas: **{len(df_emp)}**")
 
     s1, s2 = st.columns(2)
+
     if show_ta:
         base, cert, pend, pct = avance_sobre_teoria(df_emp, "TA_Teoria_OK", "TA_Practica_OK")
         with s1:
