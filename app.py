@@ -250,15 +250,30 @@ with tab_persona:
         st.info("Elegí un DNI o un Nombre para comenzar.")
     else:
         # (Acá va tu encabezado con logo + nombre)
-        col_logo, col_name = st.columns([1, 6])
+        empresa_txt = str(row.get("Empresa", "")).upper()
 
-        with col_logo:
-            if "TECHINT" in str(row["Empresa"]).upper():
-                st.image("assets/techint.png", width=70)
+logo_html = ""
+if "TECHINT" in empresa_txt:
+    logo_html = """
+    <img src="https://raw.githubusercontent.com/ximenaminojob-sketch/seguimiento-capacitaciones-ta-ec/main/assets/techint.png"
+         style="height:75px; width:auto; object-fit:contain;" />
+    """
 
-        with col_name:
-            st.markdown(f"### {row['Apellido y Nombre']} — DNI {row['DNI']}")
-            st.caption(f"{row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}")
+st.markdown(f"""
+<div style="display:flex; align-items:center; gap:18px; margin-top:12px;">
+  <div style="min-width:90px; display:flex; justify-content:center;">
+    {logo_html}
+  </div>
+  <div>
+    <div style="font-size:28px; font-weight:800; line-height:1.1;">
+      {row['Apellido y Nombre']} — DNI {row['DNI']}
+    </div>
+    <div style="color:#6B7280; margin-top:6px;">
+      {row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
         cta, cec = st.columns(2)
 
