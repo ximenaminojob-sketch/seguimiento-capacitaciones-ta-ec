@@ -1,7 +1,6 @@
 # app.py
 import streamlit as st
 import pandas as pd
-import numpy as np
 import datetime as dt
 
 st.set_page_config(page_title="Seguimiento TA/EC", layout="wide")
@@ -149,6 +148,58 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     df["TA_Estado"] = [estado(t, p, sn) for t, p, sn in zip(df["TA_Teoria_OK"], df["TA_Practica_OK"], df["TA_Practica_Pendiente_SN"])]
     df["EC_Estado"] = [estado(t, p, sn) for t, p, sn in zip(df["EC_Teoria_OK"], df["EC_Practica_OK"], df["EC_Practica_Pendiente_SN"])]
 
+    # Badges simplificados (para listado)
+    def badge_estado(x):
+        if "CERTIFICABLE" in x:
+            return "✅"
+        if "SOLO TEORÍA" in x:
+            return "🟡"
+        if "INCONSISTENCIA" in x:
+            return "⚠️"
+        return "❌"
+
+    df["TA"] = df["TA_Estado"].apply(badge_estado)
+    df["EC"] = df["EC_Estado"].apply(badge_estado)
+
+    def estado_general(r):
+        if r["TA"] == "✅" and r["EC"] == "✅":
+            return "CERTIFICABLE"
+        if r["TA"] in ["✅","🟡"] or r["EC"] in ["✅","🟡"]:
+            return "PARCIAL"
+        return "SIN CAPACITACIÓN"
+
+    df["Estado general"] = df.apply(estado_general, axis=1)
+
+    def accion(r):
+        if r["Estado general"] == "CERTIFICABLE":
+            return "📄 Emitir certificado"
+        if r["TA"] == "🟡" or r["EC"] == "🟡":
+            return "🛠 Programar práctica"
+        if r["TA"] == "⚠️" or r["EC"] == "⚠️":
+            return "🔎 Revisar registros"
+        return "📚 Programar teoría"
+
+    df["Acción"] = df.apply(accion, axis=1)
+
+    # Fechas “visibles” (una por tema, sin hora)
+    def fecha_visible(estado_txt, fecha_teo, fecha_prac):
+        # Si certificable -> fecha práctica
+        if "CERTIFICABLE" in estado_txt:
+            return fmt_fecha(fecha_prac)
+        # Si solo teoría -> fecha teoría
+        if "SOLO TEORÍA" in estado_txt:
+            return fmt_fecha(fecha_teo)
+        # Si inconsistencia y hay práctica -> mostrar práctica; si no, teoría; si no, —
+        if "INCONSISTENCIA" in estado_txt:
+            fp = fmt_fecha(fecha_prac)
+            if fp != "—":
+                return fp
+            return fmt_fecha(fecha_teo)
+        return "—"
+
+    df["Fecha TA"] = df.apply(lambda r: fecha_visible(r["TA_Estado"], r["TA - TEORÍA"], r["TA - PRÁCTICA"]), axis=1)
+    df["Fecha EC"] = df.apply(lambda r: fecha_visible(r["EC_Estado"], r["EC - TEORÍA"], r["EC - PRÁCTICA"]), axis=1)
+
     return df
 
 def avance_sobre_teoria(dfx: pd.DataFrame, teo_ok: str, prac_ok: str):
@@ -273,7 +324,6 @@ with tab_persona:
     if modo_busqueda == "DNI":
         opciones = sorted(df_f["DNI"].dropna().astype(str).unique())
         sel = st.selectbox("DNI", ["— Seleccioná —"] + opciones)
-
         if sel != "— Seleccioná —":
             fila = df_f[df_f["DNI"].astype(str) == sel]
             if not fila.empty:
@@ -281,7 +331,6 @@ with tab_persona:
     else:
         opciones = sorted(df_f["Apellido y Nombre"].dropna().astype(str).unique())
         sel = st.selectbox("Nombre y Apellido", ["— Seleccioná —"] + opciones)
-
         if sel != "— Seleccioná —":
             fila = df_f[df_f["Apellido y Nombre"].astype(str) == sel]
             if not fila.empty:
@@ -292,29 +341,15 @@ with tab_persona:
     else:
         empresa_txt = str(row.get("Empresa", "")).upper()
 
-        logo_html = ""
-        if "TECHINT" in empresa_txt:
-            # Logo alineado y a la par del nombre (flex)
-            logo_html = """
-            <img src="https://raw.githubusercontent.com/ximenaminojob-sketch/seguimiento-capacitaciones-ta-ec/main/assets/techint.png"
-                 style="height:75px; width:auto; object-fit:contain;" />
-            """
+        # Header con logo SOLO para Techint
+        col_logo, col_text = st.columns([1.2, 6.8], vertical_alignment="center")
+        with col_logo:
+            if "TECHINT" in empresa_txt:
+                st.image("assets/techint.png", width=140)
 
-        st.markdown(f"""
-<div style="display:flex; align-items:center; gap:18px; margin-top:12px;">
-  <div style="min-width:90px; display:flex; justify-content:center;">
-    {logo_html}
-  </div>
-  <div>
-    <div style="font-size:28px; font-weight:800; line-height:1.1;">
-      {row['Apellido y Nombre']} — DNI {row['DNI']}
-    </div>
-    <div style="color:#6B7280; margin-top:6px;">
-      {row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+        with col_text:
+            st.markdown(f"### {row['Apellido y Nombre']} — DNI {row['DNI']}")
+            st.caption(f"{row['Tipo de personal']} · {row['Empresa']} · {row['Puesto']} · {row['Especialidad']}")
 
         cta, cec = st.columns(2)
 
@@ -327,6 +362,8 @@ with tab_persona:
                 st.success(estado)
             elif "SOLO TEORÍA" in estado:
                 st.warning(estado)
+            elif "INCONSISTENCIA" in estado:
+                st.error(estado)
             else:
                 st.info(estado if estado else "SIN DATOS")
 
@@ -339,6 +376,8 @@ with tab_persona:
                 st.success(estado)
             elif "SOLO TEORÍA" in estado:
                 st.warning(estado)
+            elif "INCONSISTENCIA" in estado:
+                st.error(estado)
             else:
                 st.info(estado if estado else "SIN DATOS")
 
@@ -381,9 +420,15 @@ with tab_empresa:
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("### Listado")
-    cols = [
-        "Apellido y Nombre","DNI","Tipo de personal","Empresa","Puesto","Especialidad",
-        "TA_Estado","EC_Estado","TA - TEORÍA","TA - PRÁCTICA","EC - TEORÍA","EC - PRÁCTICA"
+    st.markdown("### Listado (simplificado con fechas)")
+    cols_simplificadas = [
+        "Apellido y Nombre","DNI","Empresa",
+        "TA","Fecha TA",
+        "EC","Fecha EC",
+        "Estado general","Acción"
     ]
-    st.dataframe(df_emp[cols].sort_values("Apellido y Nombre"), use_container_width=True)
+    st.dataframe(
+        df_emp[cols_simplificadas].sort_values("Apellido y Nombre"),
+        use_container_width=True,
+        hide_index=True
+    )
