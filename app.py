@@ -101,6 +101,10 @@ def norm_text(x) -> str:
     return str(x).strip().upper()
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    # ✅ FIX: limpiar nombres de columnas (quita espacios invisibles)
+    df.columns = df.columns.astype(str).str.strip()
+
+    # Quita columnas basura "Unnamed"
     df = df.loc[:, ~df.columns.astype(str).str.contains(r"^Unnamed", regex=True)].copy()
 
     required = [
@@ -119,6 +123,7 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # Limpieza y NaNs
     df["DNI"] = df["DNI"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+
     for col in ["Apellido y Nombre","Puesto","Especialidad","Tipo de personal","Empresa"]:
         df[col] = df[col].astype(str).str.strip()
         df[col] = df[col].replace({"nan": "SIN DATO", "NaN": "SIN DATO", "None": "SIN DATO"}).fillna("SIN DATO")
@@ -164,7 +169,7 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     def estado_general(r):
         if r["TA"] == "✅" and r["EC"] == "✅":
             return "CERTIFICABLE"
-        if r["TA"] in ["✅","🟡"] or r["EC"] in ["✅","🟡"]:
+        if r["TA"] in ["✅","🟡","⚠️"] or r["EC"] in ["✅","🟡","⚠️"]:
             return "PARCIAL"
         return "SIN CAPACITACIÓN"
 
@@ -183,18 +188,13 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # Fechas “visibles” (una por tema, sin hora)
     def fecha_visible(estado_txt, fecha_teo, fecha_prac):
-        # Si certificable -> fecha práctica
         if "CERTIFICABLE" in estado_txt:
             return fmt_fecha(fecha_prac)
-        # Si solo teoría -> fecha teoría
         if "SOLO TEORÍA" in estado_txt:
             return fmt_fecha(fecha_teo)
-        # Si inconsistencia y hay práctica -> mostrar práctica; si no, teoría; si no, —
         if "INCONSISTENCIA" in estado_txt:
             fp = fmt_fecha(fecha_prac)
-            if fp != "—":
-                return fp
-            return fmt_fecha(fecha_teo)
+            return fp if fp != "—" else fmt_fecha(fecha_teo)
         return "—"
 
     df["Fecha TA"] = df.apply(lambda r: fecha_visible(r["TA_Estado"], r["TA - TEORÍA"], r["TA - PRÁCTICA"]), axis=1)
@@ -341,7 +341,7 @@ with tab_persona:
     else:
         empresa_txt = str(row.get("Empresa", "")).upper()
 
-        # Header con logo SOLO para Techint
+        # Header con logo SOLO para Techint (alineado y grande)
         col_logo, col_text = st.columns([1.2, 6.8], vertical_alignment="center")
         with col_logo:
             if "TECHINT" in empresa_txt:
@@ -421,14 +421,24 @@ with tab_empresa:
 """, unsafe_allow_html=True)
 
     st.markdown("### Listado (simplificado con fechas)")
+
     cols_simplificadas = [
         "Apellido y Nombre","DNI","Empresa",
         "TA","Fecha TA",
         "EC","Fecha EC",
         "Estado general","Acción"
     ]
+
+    # ✅ FIX: no romper si falta una columna (muestra cuáles faltan)
+    faltantes = [c for c in cols_simplificadas if c not in df_emp.columns]
+    if faltantes:
+        st.warning(f"Columnas faltantes en el listado: {faltantes}")
+        st.write("Columnas disponibles:", list(df_emp.columns))
+
+    cols_ok = [c for c in cols_simplificadas if c in df_emp.columns]
+
     st.dataframe(
-        df_emp[cols_simplificadas].sort_values("Apellido y Nombre"),
+        df_emp[cols_ok].sort_values("Apellido y Nombre"),
         use_container_width=True,
         hide_index=True
     )
